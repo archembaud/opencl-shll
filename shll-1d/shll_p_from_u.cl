@@ -23,4 +23,4 @@ __kernel void compute_p_from_u(__global const float *u,
         p[(cell_id*VALUES_PER_CELL)+1] = xvel;
         p[(cell_id*VALUES_PER_CELL)+2] = specific_eng/CV;
     }
-} 
+}
