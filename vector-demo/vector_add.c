@@ -30,9 +30,18 @@ char* read_kernel_source(const char* filename) {
 
 // Function to get optimal local work group size
 size_t get_optimal_local_size(cl_device_id device_id, size_t global_size) {
+    // Get device name
+    char device_name[256];
+    cl_int ret = clGetDeviceInfo(device_id, CL_DEVICE_NAME, sizeof(device_name), device_name, NULL);
+    if (ret == CL_SUCCESS) {
+        printf("Using OpenCL device: %s\n", device_name);
+    } else {
+        printf("Using OpenCL device: (unknown)\n");
+    }
+    
     size_t max_work_group_size;
-    cl_int ret = clGetDeviceInfo(device_id, CL_DEVICE_MAX_WORK_GROUP_SIZE, 
-                                sizeof(size_t), &max_work_group_size, NULL);
+    ret = clGetDeviceInfo(device_id, CL_DEVICE_MAX_WORK_GROUP_SIZE, 
+                         sizeof(size_t), &max_work_group_size, NULL);
     if (ret != CL_SUCCESS) {
         fprintf(stderr, "Warning: Could not get max work group size, using 1\n");
         return 1;
