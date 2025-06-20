@@ -61,7 +61,7 @@ size_t get_optimal_local_size(cl_device_id device_id, size_t global_size) {
 
 int main() {
     cl_int ret;
-    const int N = 100;
+    const int N = 10000;
     // Get platform and device information
     cl_platform_id platform_id = NULL;
     cl_device_id device_id = NULL;
@@ -163,12 +163,16 @@ int main() {
     check_error(ret, "clEnqueueReadBuffer");
     
     // Display the result
-    printf("Vector Addition Results (showing first 10 elements):\n");
+    printf("Vector Addition Results:\n");
+    printf("First 10 elements:\n");
     for (int i = 0; i < 10; i++) {
         printf("c[%d] = %.2f + %.2f = %.2f\n", i, a[i], b[i], c[i]);
     }
     printf("...\n");
-    printf("c[%d] = %.2f + %.2f = %.2f\n", N-1, a[N-1], b[N-1], c[N-1]);
+    printf("Last 10 elements:\n");
+    for (int i = N - 10; i < N; i++) {
+        printf("c[%d] = %.2f + %.2f = %.2f\n", i, a[i], b[i], c[i]);
+    }
     
     // Clean up
     ret = clFlush(command_queue);
