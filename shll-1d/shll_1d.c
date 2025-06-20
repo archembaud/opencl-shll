@@ -8,6 +8,7 @@
 #define GAMMA 1.4
 #define CV (R/(GAMMA-1.0))
 #define VALUES_PER_CELL 3
+#define L 1.0
 
 // Function to check OpenCL errors
 void check_error(cl_int error, const char* operation) {
@@ -129,23 +130,45 @@ int main() {
         free(log);
         exit(1);
     }
+
+    // Now for conserved quantity update using the split flux computation (u from f)
+    kernel_source = read_kernel_source("shll_u_from_f.cl");
+    cl_program u_from_f_program = clCreateProgramWithSource(context, 1, (const char**)&kernel_source, NULL, &ret);
+    check_error(ret, "clCreateProgramWithSource");
+    
+    // Build the program
+    ret = clBuildProgram(u_from_f_program, 1, &device_id, NULL, NULL, NULL);
+    if (ret != CL_SUCCESS) {
+        size_t log_size;
+        clGetProgramBuildInfo(u_from_f_program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        char* log = malloc(log_size);
+        clGetProgramBuildInfo(u_from_f_program, device_id, CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        fprintf(stderr, "Program build failed:\n%s\n", log);
+        free(log);
+        exit(1);
+    }
+
     /*
     ============ SHLL solver preparations ==============
     */
 
     // Now we allocate the memory for the SHLL solver.
     const int N = 1000;
-    const int NO_STEPS = 1;
+    const int NO_STEPS = 100;
     float *p = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
     float *u = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
     float *fp = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
     float *fm = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
 
-    // Set the values of U first
+    // Set the values of U first - Sod's 1D shock tube problem
     for (int i = 0; i < N; i++) {
-        u[i*VALUES_PER_CELL] = 1.0; // Density
-        u[i*VALUES_PER_CELL+1] = 1.0*0.5; // Momentum (speed = 0.5)
-        u[i*VALUES_PER_CELL+2] = 1.0*(CV*1.0 + 0.5*0.5*0.5); // Energy (temp = 1.0)
+        if (i < 0.5*N) {
+            u[i*VALUES_PER_CELL] = 10.0; // Density
+        } else {
+            u[i*VALUES_PER_CELL] = 1.0; // Density
+        }
+        u[i*VALUES_PER_CELL+1] = 0.0; // Gas is stationary
+        u[i*VALUES_PER_CELL+2] = u[i*VALUES_PER_CELL]*CV*1.0; // Energy (temp = 1.0, gas not moving)
     }
     
     // Create memory buffers on the device
@@ -181,7 +204,7 @@ int main() {
     */
     cl_kernel f_from_p_kernel = clCreateKernel(f_from_p_program, "compute_f_from_p", &ret);
     check_error(ret, "clCreateKernel");
-    // Set the arguments of the p from u kernel
+    // Set the arguments of the f from p kernel
     ret = clSetKernelArg(f_from_p_kernel, 0, sizeof(cl_mem), (void*)&p_mem_obj);
     check_error(ret, "clSetKernelArg 0");
     ret = clSetKernelArg(f_from_p_kernel, 1, sizeof(cl_mem), (void*)&u_mem_obj);
@@ -193,6 +216,22 @@ int main() {
     ret = clSetKernelArg(f_from_p_kernel, 4, sizeof(int), (void*)&N);
     check_error(ret, "clSetKernelArg 2");
 
+    /*
+    -------- SHLL Compute U from F Kernel Definition ----------
+    */
+    cl_kernel u_from_f_kernel = clCreateKernel(u_from_f_program, "compute_u_from_f", &ret);
+    check_error(ret, "clCreateKernel");
+    // Set the arguments of the u from f kernel
+    ret = clSetKernelArg(u_from_f_kernel, 0, sizeof(cl_mem), (void*)&p_mem_obj);
+    check_error(ret, "clSetKernelArg 0");
+    ret = clSetKernelArg(u_from_f_kernel, 1, sizeof(cl_mem), (void*)&fp_mem_obj);
+    check_error(ret, "clSetKernelArg 1");
+    ret = clSetKernelArg(u_from_f_kernel, 2, sizeof(cl_mem), (void*)&fm_mem_obj);
+    check_error(ret, "clSetKernelArg 1");
+    ret = clSetKernelArg(u_from_f_kernel, 3, sizeof(cl_mem), (void*)&u_mem_obj);
+    check_error(ret, "clSetKernelArg 0");
+    ret = clSetKernelArg(u_from_f_kernel, 4, sizeof(int), (void*)&N);
+    check_error(ret, "clSetKernelArg 2");
 
     // Execute the OpenCL kernel on the list
     size_t global_item_size = N; // Process the entire list
@@ -208,6 +247,12 @@ int main() {
         // Compute the split fluxes
         ret = clEnqueueNDRangeKernel(command_queue, f_from_p_kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
         check_error(ret, "clEnqueueNDRangeKernel (Flux Computation)");
+        // Update U based on the split fluxes
+        ret = clEnqueueNDRangeKernel(command_queue, u_from_f_kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
+        check_error(ret, "clEnqueueNDRangeKernel (U from F Computation)");
+        // Update P from U
+        ret = clEnqueueNDRangeKernel(command_queue, p_from_u_kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
+        check_error(ret, "clEnqueueNDRangeKernel (P-from-U State Computation)");
     }
 
     // Read the memory buffer fm on the device to the local variable p
@@ -216,10 +261,20 @@ int main() {
     
     // Display the result
     printf("State Computation Results (Euler Equations):\n");
-    printf("First 10 elements:\n");
-    for (int i = 0; i < 10; i++) {
+    printf("Middle 10 elements:\n");
+    for (int i = 495; i < 505; i++) {
         printf("Cell [%d] state = %.2f, %.2f, %.2f\n", i, p[VALUES_PER_CELL*i], p[VALUES_PER_CELL*i+1], p[VALUES_PER_CELL*i+2]);
     }
+
+    // Save the results 
+    FILE *pfile;
+    pfile = fopen("results.txt", "w");
+    float DX = L/N;
+    for (int i = 0; i < N; i++) {
+        fprintf(pfile, "%g\t%g\t%g\t%g\n", i*DX, p[VALUES_PER_CELL*i], p[VALUES_PER_CELL*i+1], p[VALUES_PER_CELL*i+2]);
+    }
+    fclose(pfile);
+
    
     // Clean up
     ret = clFlush(command_queue);
@@ -230,6 +285,11 @@ int main() {
     // F from P kernel (SHLL split flux computation)
     ret = clReleaseKernel(f_from_p_kernel);
     ret = clReleaseProgram(f_from_p_program);
+    // U from F kernel (SHLL state update from split fluxes computation)
+    ret = clReleaseKernel(u_from_f_kernel);
+    ret = clReleaseProgram(u_from_f_program);
+
+    // State and flux variables
     ret = clReleaseMemObject(p_mem_obj);
     ret = clReleaseMemObject(u_mem_obj);
     ret = clReleaseMemObject(fp_mem_obj);
