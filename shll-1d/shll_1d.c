@@ -154,7 +154,7 @@ int main() {
 
     // Now we allocate the memory for the SHLL solver.
     const int N = 1000;
-    const int NO_STEPS = 100;
+    const int NO_STEPS = 2000;
     float *p = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
     float *u = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
     float *fp = (float*)malloc(N * VALUES_PER_CELL * sizeof(float));
