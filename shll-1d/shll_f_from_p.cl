@@ -1,7 +1,6 @@
 #define R 1.0
 #define GAMMA 1.4
 #define CV (R/(GAMMA-1.0))
-#define CP (CV + R)
 #define VALUES_PER_CELL 3
 
 __kernel void compute_f_from_p(__global const float *p,
@@ -30,7 +29,7 @@ __kernel void compute_f_from_p(__global const float *p,
         // Compute fluxes (Can fine tune this later)
         F[0] = u[cell_id*VALUES_PER_CELL + 1];                   // Mass flux
         F[1] = xvel*u[cell_id*VALUES_PER_CELL + 1] + P;
-        F[2] = xvel*u[cell_id*VALUES_PER_CELL + 2]; // Energy flux 
+        F[2] = xvel*(u[cell_id*VALUES_PER_CELL + 2] + P); // Energy flux 
 
         // Compute Fp (forward flux)
         // FP[:,:,0] = F[:,:,0]*Z1 + U[:,:,0]*Z2
